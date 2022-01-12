@@ -1,0 +1,2 @@
+[ERROR][log.go:69]2022/01/05 17:48:35 [Key: 'createUserRequest.Password' Error:Field validation for 'Password' failed on the 'min' tag]
+[ERROR][log.go:69]2022/01/05 17:49:04 [Key: 'createUserRequest.Email' Error:Field validation for 'Email' failed on the 'email' tag]
