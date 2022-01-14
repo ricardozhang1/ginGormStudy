@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"log"
 	"net/http"
 	"sync"
 )
@@ -44,11 +43,11 @@ func GetProduct(w http.ResponseWriter, req *http.Request) {
 	return
 }
 
-func main() {
-	http.HandleFunc("/getOne", GetProduct)
-	err := http.ListenAndServe(":8084", nil)
-	if err != nil {
-		log.Fatal("Err:", err)
-	}
-}
+//func main() {
+//	http.HandleFunc("/getOne", GetProduct)
+//	err := http.ListenAndServe(":8084", nil)
+//	if err != nil {
+//		log.Fatal("Err:", err)
+//	}
+//}
 

@@ -1,15 +1,18 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/ioutil"
 	"irisStudy/common"
+	"irisStudy/datamodels"
 	"irisStudy/rabbitmq"
 	"irisStudy/token"
 	"log"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 )
@@ -179,11 +182,23 @@ func GetCurl(hostUrl string, request *http.Request) (response *http.Response, bo
 func Auth(response http.ResponseWriter, request *http.Request) error {
 	log.Println("执行验证操作")
 	// 添加权限验证
+	// 验证url中的uid 是否与 authorization 解密后的uid值 相等
 	err := CheckUserInfo(request)
 	if err != nil {
 		return err
 	}
 	return nil
+}
+
+func CheckRight(response http.ResponseWriter, request *http.Request) {
+	log.Println("执行checkRight 逻辑...")
+	right := accessControl.GetDistributedRight(request)
+	if !right {
+		_, _ = response.Write([]byte("false"))
+		return
+	}
+	_, _ = response.Write([]byte("true"))
+	return
 }
 
 // Check 执行正常业务逻辑
@@ -213,55 +228,56 @@ func Check(response http.ResponseWriter, request *http.Request) {
 		return
 	}
 
-
-
 	// 2.获取数量控制权限，防止出现超卖现象
-	//hostUrl := fmt.Sprintf("http://%s:%s/getOne", "127.0.0.1", port)
-	//responseValidate, validateBody, err := GetCurl(hostUrl, request)
-	//if err != nil {
-	//	_, _ = response.Write([]byte("false"))
-	//	return
-	//}
+	hostUrl := fmt.Sprintf("http://%s:%s/getOne", "127.0.0.1", "8084")
+	fmt.Println(hostUrl)
+	responseValidate, validateBody, err := GetCurl(hostUrl, request)
+	if err != nil {
+		_, _ = response.Write([]byte("false"))
+		return
+	}
+
+	fmt.Println(responseValidate.StatusCode, string(validateBody))
 
 	// 判断数量控制请求
-	//if responseValidate.StatusCode == 200 {
-	//	if string(validateBody) == "true" {
-	//		// 整合下单
-	//		// 1.获取商品ID
-	//		productID, err := strconv.ParseInt(productId, 10, 64)
-	//		if err != nil {
-	//			_, _ = response.Write([]byte("false"))
-	//			return
-	//		}
-	//
-	//		// 2.获取用户ID
-	//		userID, err := strconv.ParseInt(uid, 10, 64)
-	//		if err != nil {
-	//			_, _ = response.Write([]byte("false"))
-	//			return
-	//		}
-	//
-	//		// 3.创建消息体
-	//		message := datamodels.NewMessage(userID, productID)
-	//		// 类型转换
-	//		byteMessage, err := json.Marshal(message)
-	//		if err != nil {
-	//			_, _ = response.Write([]byte("false"))
-	//			return
-	//		}
-	//
-	//		// 4.生产消息
-	//		err = rabbitMqValidate.PublishSimple(string(byteMessage))
-	//		if err != nil {
-	//			_, _ = response.Write([]byte("false"))
-	//			return
-	//		}
-	//
-	//		_, _ = response.Write([]byte("ture"))
-	//		return
-	//
-	//	}
-	//}
+	if responseValidate.StatusCode == 200 {
+		if string(validateBody) == "true" {
+			// 整合下单
+			// 1.获取商品ID
+			productID, err := strconv.ParseInt(productId, 10, 64)
+			if err != nil {
+				_, _ = response.Write([]byte("false"))
+				return
+			}
+
+			// 2.获取用户ID
+			userID, err := strconv.ParseInt(uid, 10, 64)
+			if err != nil {
+				_, _ = response.Write([]byte("false"))
+				return
+			}
+
+			// 3.创建消息体
+			message := datamodels.NewMessage(userID, productID)
+			// 类型转换
+			byteMessage, err := json.Marshal(message)
+			if err != nil {
+				_, _ = response.Write([]byte("false"))
+				return
+			}
+
+			// 4.生产消息
+			err = rabbitMqValidate.PublishSimple(string(byteMessage))
+			if err != nil {
+				_, _ = response.Write([]byte("false"))
+				return
+			}
+
+			_, _ = response.Write([]byte("ture"))
+			return
+
+		}
+	}
 	//_, _ = response.Write([]byte("false"))
 	return
 }
@@ -272,13 +288,16 @@ func CheckUserInfo(request *http.Request) error {
 	// 获取到由url传入的参数uid
 	queryData, err := url.ParseQuery(request.URL.RawQuery)
 	if err != nil {
+		log.Println("用户uid 获取失败...")
 		return err
 	}
 	if len(queryData) < 1 || len(queryData["uid"]) < 1 {
 		err = errors.New("query params is not found")
+		log.Println("用户uid 参数没有传入...")
 		return err
 	}
 	uid := queryData["uid"][0]
+	fmt.Println("CheckUserInfo uid: ", uid)
 
 	// 获取用户加密串
 	authorizationHeader := request.Header.Get(authorizationHeaderKey)
@@ -290,27 +309,32 @@ func CheckUserInfo(request *http.Request) error {
 	fields := strings.Fields(authorizationHeader)
 	if len(fields) < 2 {
 		err = errors.New("invalid authorization header format")
+		log.Println("token值 authorization获取失败...")
 		return err
 	}
 
 	authorizationType := strings.ToLower(fields[0])
 	if authorizationType != authorizationTypeBearer {
 		err = fmt.Errorf("unsupported authorization type %s", authorizationType)
+		log.Println("token值 authorization类型不正确...")
 		return err
 	}
 
 	accessToken := fields[1]
+	// 对信息进行解密
 	payload, err := tokenMaker.VerifyToken(accessToken)
 
 	// 判断是否有解析都token值，若无则是token过期
 	if payload == nil {
+		log.Println("token值 authorization解析失败，可能被篡改...")
 		return errors.New("auth failed, login again")
 	}
 
 	if uid == payload.UserId {
 		return nil
 	}
-	// 非当前用户登录时
+	// 非当前用户登录时，身份校验失败
+	log.Println("uid 与 authorization 不是同一用户， 身份校验失败")
 	return errors.New("auth failed")
 }
 
@@ -350,8 +374,10 @@ func main() {
 	filter := common.NewFilter()
 	// 注册拦截器
 	filter.RegisterFilterUri("/check", Auth)
+	filter.RegisterFilterUri("/checkRight", Auth)
 	// 启动服务
 	http.HandleFunc("/check", filter.Handle(Check))
+	http.HandleFunc("/checkRight", filter.Handle(CheckRight))
 	if err := http.ListenAndServe(":8083", nil); err != nil {
 		log.Fatal("failed to start http server")
 	}

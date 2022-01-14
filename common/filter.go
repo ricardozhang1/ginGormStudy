@@ -2,6 +2,7 @@ package common
 
 import (
 	"net/http"
+	"strings"
 )
 
 // 声明一个新的数据类型(函数类型)
@@ -37,7 +38,7 @@ func (f *Filter) Handle(webHandle WebHandle) func(response http.ResponseWriter, 
 	return func(response http.ResponseWriter, request *http.Request) {
 		for path, handler := range f.filterMap {
 			// request.RequestURI
-			if path == request.URL.Path {
+			if strings.Contains(request.RequestURI, path) {
 				// 执行拦截逻辑
 				if err := handler(response, request); err != nil {
 					_, _ =response.Write([]byte(err.Error()))
